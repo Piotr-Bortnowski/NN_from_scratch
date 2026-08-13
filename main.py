@@ -7,7 +7,8 @@ def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
 def sigmoid_derivative(x):
-    return sigmoid(x) * (1 - sigmoid(x))
+    s = sigmoid(x)
+    return s * (1 - s)
 
 def relu(x):
     return np.where(x > 0, x, 0)
@@ -25,7 +26,7 @@ def MSE(y_true, y_pred):
     return np.mean((y_true - y_pred) ** 2)
 
 def MSE_derivative(y_true, y_pred):
-    return 2 * (y_pred - y_true) / y_true.shape[0]
+    return 2 * (y_pred - y_true) / y_true.shape[0] # or y_true.size idk
 
 def softmax(x):
     exp_x = np.exp(x - np.max(x, axis=1, keepdims=True))
@@ -35,6 +36,11 @@ def cross_entropy(y_true, y_pred):
     eps = 1e-15
     y_pred = np.clip(y_pred, eps, 1 - eps)
     return -np.mean(np.sum(y_true * np.log(y_pred), axis=1))
+
+def cross_entropy_derivative(y_true, y_pred):
+    eps = 1e-15
+    y_pred = np.clip(y_pred, eps, 1 - eps)
+    return -(y_true / y_pred) / y_true.shape[0]
 
 def softmax_cross_entropy_derivative(y_true, y_pred):
     return (y_pred - y_true) / y_true.shape[0]
@@ -71,12 +77,12 @@ activation_funcs_dict = {
         "sigmoid": (sigmoid, sigmoid_derivative),
         "relu": (relu, relu_derivative),
         "leaky_relu": (leaky_relu, leaky_relu_derivative),
-        "softmax": (softmax, softmax_cross_entropy_derivative)
+        "softmax": (softmax, None)
     }
 
 loss_funcs_dict = {
     "MSE": (MSE, MSE_derivative),
-    "CrossEntropy": (cross_entropy, softmax_cross_entropy_derivative)
+    "CrossEntropy": (cross_entropy,)
 }
 
 class MyNN:
@@ -110,12 +116,13 @@ class MyNN:
         # Initializing weights based on layers and biases
         self.weights = []
         self.biases = []
+
+        # Xavier/Glorot Initialization
         for i in range(self.num_weight_layers):
-            # Weights with "He Normal initialization"
             in_dim = self.architecture[i]
             out_dim = self.architecture[i + 1]
-            self.weights.append(np.sqrt(2/in_dim) * np.random.randn(in_dim, out_dim))
-            # Biases
+            limit = np.sqrt(2.0 / (in_dim + out_dim))
+            self.weights.append(np.random.randn(in_dim, out_dim) * limit)
             self.biases.append(np.zeros((1, out_dim)))
 
         # First moment
@@ -142,7 +149,7 @@ class MyNN:
             if training and is_hidden_layer and self.dropout_rate > 0:
                 keep_prob = 1 - self.dropout_rate
                 mask = np.random.rand(*x.shape) < keep_prob
-                x = x * mask / keep_prob
+                x = (x * mask) / keep_prob
                 self.dropout_masks.append(mask)
             else:
                 self.dropout_masks.append(None)
@@ -151,11 +158,21 @@ class MyNN:
         return x
 
     def backward(self, y_true, t):
+        n_batch = y_true.shape[0] # samples in batch
+
         if self.loss_func == cross_entropy and self.activations_funcs[-1] == softmax:
-            dZ_last = self.loss_func_derivative(y_true, self.A[-1])
+            dZ_last = (self.A[-1] - y_true) / n_batch
         else:
             dA_last = self.loss_func_derivative(y_true, self.A[-1])
-            dZ_last = dA_last * self.activation_func_derivatives[-1](self.Z[-1]) # shape (N_batch_size X D_out)
+
+            if self.activations_funcs[-1] == softmax:
+                # Softmax with any other loss function (e.g. MSE)
+                A_last = self.A[-1]
+                sum_dA_A = np.sum(dA_last * A_last, axis=1, keepdims=True)
+                dZ_last = A_last * (dA_last - sum_dA_A)
+            else:
+                # Standard activation functions (Sigmoid, ReLU, LeakyReLU)
+                dZ_last = dA_last * self.activation_func_derivatives[-1](self.Z[-1]) # shape (N_batch_size X D_out)
 
 
         eps = 10 ** -8
@@ -165,6 +182,9 @@ class MyNN:
             dW = np.dot(self.A[i].T, dZ_last)   #(NxIN).T * NxOUT
                                                 # INxN * NxOUT => shape of weights
             dB = np.sum(dZ_last, axis=0, keepdims=True) # summing bias gradients over a batch
+
+            if self.L2_coef > 0:  # add gradient for L2 regularization
+                dW += (self.L2_coef / n_batch) * self.weights[i]
 
             self.m_W[i] = self.B_1 * self.m_W[i] + (1 - self.B_1) * dW
             self.v_W[i] = self.B_2 * self.v_W[i] + (1 - self.B_2) * (dW ** 2)
@@ -182,18 +202,14 @@ class MyNN:
 
             step_b = self.lr * m_hat_b / (np.sqrt(v_hat_b) + eps)
 
-
             if i > 0:
                 dA_last = np.dot(dZ_last, self.weights[i].T)
                 if self.dropout_masks[i - 1] is not None:
-                    dA_last = dA_last * self.dropout_masks[i - 1]
+                    dA_last = dA_last * self.dropout_masks[i - 1] / (1 - self.dropout_rate)
                 dZ_last = dA_last * self.activation_func_derivatives[i - 1](self.Z[i-1])
 
-            n = y_true.shape[0]  # samples in batch
-
-            self.weights[i] -= (step_W + self.lr * (self.L2_coef / n) * self.weights[i])  # add gradient for L2 regularization
+            self.weights[i] -= step_W
             self.biases[i] -= step_b
-
 
 
     def train(self, X, y, epochs, batch_size=32, shuffle=True, val_data=None):
@@ -231,11 +247,11 @@ class MyNN:
 
                 # calculating loss
                 batch_loss = self.compute_loss(current_batch_y, y_pred)
-                train_loss = batch_loss * (batch_end - batch_start)
+                train_loss += batch_loss * (batch_end - batch_start)
 
 
 
-            train_loss /= num_batches
+            train_loss /= num_samples
             # calculating validation loss
             if val_data is not None:
                 X_val, y_val = val_data
@@ -243,10 +259,12 @@ class MyNN:
                 y_val_pred = self.predict(X_val)
                 val_loss = self.compute_loss(y_val, y_val_pred)
 
-            if epoch % EPOCHS_TO_PRINT == 0:
-                print(f"Epoch {epoch}/{epochs} - Train loss: {train_loss:.4f}", end=", ")
-                if val_data is None: continue
-                print(f"Validation loss: {val_loss:.4f}")
+            if (epoch + 1) % EPOCHS_TO_PRINT == 0 or epoch == 0:
+                if (epoch + 1) % EPOCHS_TO_PRINT == 0 or epoch == 0:
+                    if val_data is None:
+                        print(f"Epoch {epoch + 1}/{epochs} - Train loss: {train_loss:.4f}")
+                    else:
+                        print( f"Epoch {epoch + 1}/{epochs} - Train loss: {train_loss:.4f}, Validation loss: {val_loss:.4f}")
 
 
     def predict(self, X):
@@ -285,4 +303,4 @@ if __name__ == "__main__":
     )
 
 
-nn.train(X_train, y_train, epochs=100, batch_size=32, val_data=(X_val, y_val))
+    nn.train(X_train, y_train, epochs=100, batch_size=32, val_data=(X_val, y_val))
