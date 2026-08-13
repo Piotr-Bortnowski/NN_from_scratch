@@ -1,5 +1,8 @@
 import numpy as np
 
+
+# Helper functions
+
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
@@ -35,6 +38,32 @@ def cross_entropy(y_true, y_pred):
 
 def softmax_cross_entropy_derivative(y_true, y_pred):
     return (y_pred - y_true) / y_true.shape[0]
+
+
+def train_val_test_split(X, y, val_ratio=0.15, test_ratio=0.15, shuffle=True):
+    n_samples = X.shape[0]
+    if shuffle:
+        indices = np.random.permutation(n_samples)
+        X = X[indices]
+        y = y[indices]
+
+    val_size = int(n_samples * val_ratio)
+    test_size = int(n_samples * test_ratio)
+
+    # Get splits from sizes
+    X_test = X[: test_size]
+    y_test = y[: test_size]
+
+    X_val = X[test_size: test_size + val_size]
+    y_val = y[test_size: test_size + val_size]
+
+    X_train = X[test_size + val_size:]
+    y_train = y[test_size + val_size:]
+
+    return X_train, y_train, X_val, y_val, X_test, y_test
+
+
+
 
 # Dictionary for mapping activation function -> method and its derivative
 # stored in a tuple (fun, fun_der)
@@ -219,27 +248,15 @@ class MyNN:
         return self.forward(X, training=False)
 
 
-
 if __name__ == "__main__":
     np.random.seed(42)
 
     X_data = np.random.uniform(-2, 2, (1000, 2))
-    y_data = ((X_data[:, 0]**2 + X_data[:, 1]**2) < 1.0).astype(int).reshape(-1, 1)
+    y_data = ((X_data[:, 0] ** 2 + X_data[:, 1] ** 2) < 1.0).astype(int).reshape(-1, 1)
 
-    # Inicjalizacja z Dropoutem (20% porzucanych neuronów) i L2 (lambda = 0.001)
-    nn = MyNN(
-        architecture=[2, 32, 16, 1],
-        activations=["leaky_relu", "leaky_relu", "sigmoid"],
-        loss_func="MSE",
-        learning_rate=0.01,
-        dropout_rate=0.2,
-        L2_reg_coef=0.001
+    # 2. Podział na 3 zbiory: 70% Train, 15% Val, 15% Test
+    X_train, X_val, X_test, y_train, y_val, y_test = train_val_test_split(
+        X=X_data, y=y_data, val_ratio=0.15, test_ratio=0.15
     )
 
-    print("Trening z Dropout (p=0.2) oraz L2 (lambda=0.001)...")
-    nn.train(X_data, y_data, epochs=500, batch_size=32)
-
-    # Predykcja (Dropout automatycznie wyłączony)
-    predictions = (nn.predict(X_data) > 0.5).astype(int)
-    acc = np.mean(predictions == y_data) * 100
-    print(f"\nDokładność (Accuracy) na danych testowych: {acc:.2f}%")
+    
