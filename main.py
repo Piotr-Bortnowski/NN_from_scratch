@@ -52,7 +52,8 @@ loss_funcs_dict = {
 
 class MyNN:
 
-    def __init__(self, architecture, activations, loss_func, learning_rate=0.001, moment_decay_1=0.9, moment_decay_2=0.999):
+    def __init__(self, architecture, activations, loss_func,
+                 learning_rate=0.001, moment_decay_1=0.9, moment_decay_2=0.999, L2_reg_coef=0.01):
         if len(architecture) != len(activations) + 1:
             raise ValueError("There must be exactly one more layer than activation functions")
 
@@ -61,6 +62,7 @@ class MyNN:
         self.lr = learning_rate
         self.B_1 = moment_decay_1
         self.B_2 = moment_decay_2
+        self.L2_coef = L2_reg_coef
 
         # Setting activation funcs and derivatives
         self.activations_funcs = [activation_funcs_dict[fun][0] for fun in activations]
@@ -181,6 +183,8 @@ class MyNN:
                 # calculating loss
                 if epoch % EPOCHS_TO_PRINT == 0:
                     partial_loss = self.loss_func(current_batch_y, y_pred) * (batch_end - batch_start)
+                    weights_sum = np.sum(np.sum(np.sum(self.weights, axis=0), axis=0), axis=0) # sum of every weight in every layer
+                    partial_loss += (self.L2_coef / batch_end - batch_start) * weights_sum                                                     # np.sum called 3 times since there are 3 dimensions
                     current_epoch_loss += partial_loss
 
             if epoch % EPOCHS_TO_PRINT == 0:
@@ -196,3 +200,4 @@ y = np.array([[0], [1], [1], [0]])
 nn.train(X, y, 10000)
 preds = nn.forward(X)
 print(preds)
+
