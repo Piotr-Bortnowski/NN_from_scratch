@@ -53,7 +53,7 @@ loss_funcs_dict = {
 class MyNN:
 
     def __init__(self, architecture, activations, loss_func,
-                 learning_rate=0.001, moment_decay_1=0.9, moment_decay_2=0.999, L2_reg_coef=0.01):
+                 learning_rate=0.001, moment_decay_1=0.9, moment_decay_2=0.999, L2_reg_coef=0.001):
         if len(architecture) != len(activations) + 1:
             raise ValueError("There must be exactly one more layer than activation functions")
 
@@ -143,7 +143,9 @@ class MyNN:
                 dA_last = np.dot(dZ_last, self.weights[i].T)
                 dZ_last = dA_last * self.activation_func_derivatives[i - 1](self.Z[i-1])
 
-            self.weights[i] -= step_W
+            n = y_true.shape[0]  # samples in batch
+
+            self.weights[i] -= (step_W + self.lr * (self.L2_coef / n) * self.weights[i])  # add gradient for L2 regularization
             self.biases[i] -= step_b
 
 
@@ -182,18 +184,23 @@ class MyNN:
                 self.backward(current_batch_y, t)
                 # calculating loss
                 if epoch % EPOCHS_TO_PRINT == 0:
-                    partial_loss = self.loss_func(current_batch_y, y_pred) * (batch_end - batch_start)
-                    weights_sum = np.sum(np.sum(np.sum(self.weights, axis=0), axis=0), axis=0) # sum of every weight in every layer
-                    partial_loss += (self.L2_coef / batch_end - batch_start) * weights_sum                                                     # np.sum called 3 times since there are 3 dimensions
-                    current_epoch_loss += partial_loss
+                    batch_n = current_batch_y.shape[0]
+                    batch_loss = self.loss_func(current_batch_y, y_pred)
+                    current_epoch_loss += batch_loss * batch_n
 
             if epoch % EPOCHS_TO_PRINT == 0:
                 current_epoch_loss /= num_samples
+
+                l2_penalty = sum(np.sum(W ** 2) for W in self.weights)
+                l2_cost = (self.L2_coef * l2_penalty) / (2 * num_samples)
+
+                current_epoch_loss += l2_cost
+
                 print(f"Epoch {epoch} - Loss: {current_epoch_loss}")
 
 
 
-nn = MyNN([2, 4, 1], ["leaky_relu", "sigmoid"], "MSE", learning_rate=0.01)
+nn = MyNN([2, 4, 1], ["leaky_relu", "sigmoid"], "MSE", learning_rate=0.01, )
 
 X = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
 y = np.array([[0], [1], [1], [0]])
