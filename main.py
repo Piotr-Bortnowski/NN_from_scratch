@@ -1,5 +1,5 @@
 import numpy as np
-
+from sklearn.datasets import fetch_openml
 
 # Helper functions
 
@@ -82,7 +82,7 @@ activation_funcs_dict = {
 
 loss_funcs_dict = {
     "MSE": (MSE, MSE_derivative),
-    "CrossEntropy": (cross_entropy,)
+    "CrossEntropy": (cross_entropy, cross_entropy_derivative)
 }
 
 class MyNN:
@@ -260,11 +260,10 @@ class MyNN:
                 val_loss = self.compute_loss(y_val, y_val_pred)
 
             if (epoch + 1) % EPOCHS_TO_PRINT == 0 or epoch == 0:
-                if (epoch + 1) % EPOCHS_TO_PRINT == 0 or epoch == 0:
-                    if val_data is None:
-                        print(f"Epoch {epoch + 1}/{epochs} - Train loss: {train_loss:.4f}")
-                    else:
-                        print( f"Epoch {epoch + 1}/{epochs} - Train loss: {train_loss:.4f}, Validation loss: {val_loss:.4f}")
+                if val_data is None:
+                    print(f"Epoch {epoch + 1}/{epochs} - Train loss: {train_loss:.4f}")
+                else:
+                    print( f"Epoch {epoch + 1}/{epochs} - Train loss: {train_loss:.4f}, Validation loss: {val_loss:.4f}")
 
 
     def predict(self, X):
@@ -284,23 +283,44 @@ class MyNN:
 if __name__ == "__main__":
     np.random.seed(42)
 
-    # Random dataset
-    X_data = np.random.uniform(-2, 2, (1000, 2))
-    y_data = ((X_data[:, 0] ** 2 + X_data[:, 1] ** 2) < 1.0).astype(int).reshape(-1, 1)
 
-    # Split the dataset
-    X_train, y_train, X_val, y_val, X_test, y_test = train_val_test_split(
-        X=X_data, y=y_data, val_ratio=0.15, test_ratio=0.15
-    )
+    # Load test and train data
+    print("Fetching MNIST ...")
+
+    mnist_data = fetch_openml('mnist_784', version=1, as_frame=False) # as_frame=False -> we get np.array
+
+    X = mnist_data["data"]  # Shape: (70000, 784)
+    y = mnist_data["target"].astype(int)  # Shape: (70000,) string to integers
+
+    #y_one_hot = np.zeros((y.shape[0], 10))
+
+    #y_one_hot[np.arange(y.shape[0]), y] = 1
+
+    X_train, y_train, X_val, y_val, X_test, y_test = train_val_test_split(X, y, val_ratio=0.0, test_ratio=1/7, shuffle=True)
+
+    y_train_one_hot = np.zeros((y_train.shape[0], 10))
+    y_train_one_hot[np.arange(y_train.shape[0]), y_train] = 1
+
+    # Normalize to range [0.0; 1.0]
+    X_train = X_train / 255.0
+    X_test = X_test / 255.0
+
 
     nn = MyNN(
-        architecture=[2, 16, 8, 1],
-        activations=["leaky_relu", "leaky_relu", "sigmoid"],
-        loss_func="MSE",
-        learning_rate=0.01,
+        architecture=[784, 256, 128, 10],
+        activations=["leaky_relu", "leaky_relu", "softmax"],
+        loss_func="CrossEntropy",
+        learning_rate=0.001,
         dropout_rate=0.1,
-        L2_reg_coef=0.001
+        L2_reg_coef=0.0001
     )
 
 
-    nn.train(X_train, y_train, epochs=100, batch_size=32, val_data=(X_val, y_val))
+    nn.train(X_train, y_train_one_hot, epochs=10, batch_size=32, val_data=None)
+
+    y_test_pred = nn.predict(X_test)
+
+    y_pred = np.argmax(y_test_pred, axis=1)
+
+    accuracy = np.equal(y_test, y_pred).mean()
+    print(accuracy)
