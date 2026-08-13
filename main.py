@@ -146,15 +146,47 @@ class MyNN:
 
 
 
-    def train(self, X, y, epochs):
+    def train(self, X, y, epochs, batch_size=32, shuffle=True):
+        num_samples = X.shape[0]
+        if batch_size == None or batch_size >= X.shape[0]:
+            batch_size = num_samples
+
+        t = 0
+        EPOCHS_TO_PRINT = 100
+
         for epoch in range(epochs):
-            y_pred = self.forward(X)
+            # shuffle samples
+            if shuffle:
+                indices = np.random.permutation(num_samples)
+                X_shuffled = X[indices]
+                y_shuffled = y[indices]
+            else:
+                X_shuffled = X
+                y_shuffled = y
 
-            self.backward(y, epoch+1)
-            if epoch % 100 == 0:
-                loss = self.loss_func(y, y_pred)
+            current_epoch_loss = 0.0
+            # iterate over all batches
+            num_batches = int(np.ceil(num_samples / batch_size))
+            for i in range(num_batches): # number of batches
+                # batch indexes
+                batch_start = i * batch_size
+                batch_end = min(batch_start + batch_size, num_samples)
+                current_batch_X = X_shuffled[batch_start:batch_end]
+                current_batch_y = y_shuffled[batch_start:batch_end]
 
-                print("loss: ", loss)
+                t += 1
+                # forward and backprop
+                y_pred = self.forward(current_batch_X)
+                self.backward(current_batch_y, t)
+                # calculating loss
+                if epoch % EPOCHS_TO_PRINT == 0:
+                    partial_loss = self.loss_func(current_batch_y, y_pred) * (batch_end - batch_start)
+                    current_epoch_loss += partial_loss
+
+            if epoch % EPOCHS_TO_PRINT == 0:
+                current_epoch_loss /= num_samples
+                print(f"Epoch {epoch} - Loss: {current_epoch_loss}")
+
 
 
 nn = MyNN([2, 4, 1], ["leaky_relu", "sigmoid"], "MSE", learning_rate=0.01)
@@ -163,4 +195,4 @@ X = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
 y = np.array([[0], [1], [1], [0]])
 nn.train(X, y, 10000)
 preds = nn.forward(X)
-print(preds.round(4))
+print(preds)
