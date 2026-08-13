@@ -53,7 +53,7 @@ loss_funcs_dict = {
 class MyNN:
 
     def __init__(self, architecture, activations, loss_func,
-                 learning_rate=0.001, moment_decay_1=0.9, moment_decay_2=0.999, L2_reg_coef=0.001):
+                 learning_rate=0.001, moment_decay_1=0.9, moment_decay_2=0.999, L2_reg_coef=0.001, dropout_rate=0.2):
         if len(architecture) != len(activations) + 1:
             raise ValueError("There must be exactly one more layer than activation functions")
 
@@ -63,6 +63,7 @@ class MyNN:
         self.B_1 = moment_decay_1
         self.B_2 = moment_decay_2
         self.L2_coef = L2_reg_coef
+        self.dropout_rate = dropout_rate
 
         # Setting activation funcs and derivatives
         self.activations_funcs = [activation_funcs_dict[fun][0] for fun in activations]
@@ -75,6 +76,7 @@ class MyNN:
         # Lists for saving values for backprop calculated in forward pass
         self.A = []
         self.Z = []
+        self.dropout_masks = []
 
         # Initializing weights based on layers and biases
         self.weights = []
@@ -95,14 +97,27 @@ class MyNN:
         self.v_W = [np.zeros_like(W) for W in self.weights]
         self.v_b = [np.zeros_like(b) for b in self.biases]
 
-    def forward(self, x):
+    def forward(self, x, training=False):
         self.A = []
         self.Z = []
+        self.dropout_masks = []
+
+
         self.A.append(x)
         for i in range(self.num_weight_layers):
             x = np.dot(x, self.weights[i]) + self.biases[i]
             self.Z.append(x)
             x = self.activations_funcs[i](x)
+
+            is_hidden_layer = i < (self.num_weight_layers - 1)
+            if training and is_hidden_layer and self.dropout_rate > 0:
+                keep_prob = 1 - self.dropout_rate
+                mask = np.random.rand(*x.shape) < keep_prob
+                x = x * mask / keep_prob
+                self.dropout_masks.append(mask)
+            else:
+                self.dropout_masks.append(None)
+
             self.A.append(x)
         return x
 
@@ -141,6 +156,8 @@ class MyNN:
 
             if i > 0:
                 dA_last = np.dot(dZ_last, self.weights[i].T)
+                if self.dropout_masks[i - 1] is not None:
+                    dA_last = dA_last * self.dropout_masks[i - 1]
                 dZ_last = dA_last * self.activation_func_derivatives[i - 1](self.Z[i-1])
 
             n = y_true.shape[0]  # samples in batch
@@ -180,7 +197,7 @@ class MyNN:
 
                 t += 1
                 # forward and backprop
-                y_pred = self.forward(current_batch_X)
+                y_pred = self.forward(current_batch_X, training=True)
                 self.backward(current_batch_y, t)
                 # calculating loss
                 if epoch % EPOCHS_TO_PRINT == 0:
@@ -198,13 +215,31 @@ class MyNN:
 
                 print(f"Epoch {epoch} - Loss: {current_epoch_loss}")
 
+    def predict(self, X):
+        return self.forward(X, training=False)
 
 
-nn = MyNN([2, 4, 1], ["leaky_relu", "sigmoid"], "MSE", learning_rate=0.01, )
 
-X = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
-y = np.array([[0], [1], [1], [0]])
-nn.train(X, y, 10000)
-preds = nn.forward(X)
-print(preds)
+if __name__ == "__main__":
+    np.random.seed(42)
 
+    X_data = np.random.uniform(-2, 2, (1000, 2))
+    y_data = ((X_data[:, 0]**2 + X_data[:, 1]**2) < 1.0).astype(int).reshape(-1, 1)
+
+    # Inicjalizacja z Dropoutem (20% porzucanych neuronów) i L2 (lambda = 0.001)
+    nn = MyNN(
+        architecture=[2, 32, 16, 1],
+        activations=["leaky_relu", "leaky_relu", "sigmoid"],
+        loss_func="MSE",
+        learning_rate=0.01,
+        dropout_rate=0.2,
+        L2_reg_coef=0.001
+    )
+
+    print("Trening z Dropout (p=0.2) oraz L2 (lambda=0.001)...")
+    nn.train(X_data, y_data, epochs=500, batch_size=32)
+
+    # Predykcja (Dropout automatycznie wyłączony)
+    predictions = (nn.predict(X_data) > 0.5).astype(int)
+    acc = np.mean(predictions == y_data) * 100
+    print(f"\nDokładność (Accuracy) na danych testowych: {acc:.2f}%")
