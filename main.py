@@ -196,13 +196,13 @@ class MyNN:
 
 
 
-    def train(self, X, y, epochs, batch_size=32, shuffle=True):
+    def train(self, X, y, epochs, batch_size=32, shuffle=True, val_data=None):
         num_samples = X.shape[0]
         if batch_size == None or batch_size >= X.shape[0]:
             batch_size = num_samples
 
         t = 0
-        EPOCHS_TO_PRINT = 100
+        EPOCHS_TO_PRINT = 10
 
         for epoch in range(epochs):
             # shuffle samples
@@ -214,7 +214,7 @@ class MyNN:
                 X_shuffled = X
                 y_shuffled = y
 
-            current_epoch_loss = 0.0
+            train_loss = 0.0
             # iterate over all batches
             num_batches = int(np.ceil(num_samples / batch_size))
             for i in range(num_batches): # number of batches
@@ -228,35 +228,61 @@ class MyNN:
                 # forward and backprop
                 y_pred = self.forward(current_batch_X, training=True)
                 self.backward(current_batch_y, t)
+
                 # calculating loss
-                if epoch % EPOCHS_TO_PRINT == 0:
-                    batch_n = current_batch_y.shape[0]
-                    batch_loss = self.loss_func(current_batch_y, y_pred)
-                    current_epoch_loss += batch_loss * batch_n
+                batch_loss = self.compute_loss(current_batch_y, y_pred)
+                train_loss = batch_loss * (batch_end - batch_start)
+
+
+
+            train_loss /= num_batches
+            # calculating validation loss
+            if val_data is not None:
+                X_val, y_val = val_data
+
+                y_val_pred = self.predict(X_val)
+                val_loss = self.compute_loss(y_val, y_val_pred)
 
             if epoch % EPOCHS_TO_PRINT == 0:
-                current_epoch_loss /= num_samples
+                print(f"Epoch {epoch}/{epochs} - Train loss: {train_loss:.4f}", end=", ")
+                if val_data is None: continue
+                print(f"Validation loss: {val_loss:.4f}")
 
-                l2_penalty = sum(np.sum(W ** 2) for W in self.weights)
-                l2_cost = (self.L2_coef * l2_penalty) / (2 * num_samples)
-
-                current_epoch_loss += l2_cost
-
-                print(f"Epoch {epoch} - Loss: {current_epoch_loss}")
 
     def predict(self, X):
         return self.forward(X, training=False)
 
+    def compute_loss(self, y_true, y_pred):
+        # Chosen loss function
+        data_loss = self.loss_func(y_true, y_pred)
+
+        # L2 penalty - cost of all weights squared
+        if self.L2_coef > 0:
+            n = y_true.shape[0]
+            l2_cost = sum(np.sum(W ** 2) for W in self.weights)
+            return data_loss + (self.L2_coef / (2 * n)) * l2_cost
+        return data_loss
 
 if __name__ == "__main__":
     np.random.seed(42)
 
+    # Random dataset
     X_data = np.random.uniform(-2, 2, (1000, 2))
     y_data = ((X_data[:, 0] ** 2 + X_data[:, 1] ** 2) < 1.0).astype(int).reshape(-1, 1)
 
-    # 2. Podział na 3 zbiory: 70% Train, 15% Val, 15% Test
-    X_train, X_val, X_test, y_train, y_val, y_test = train_val_test_split(
+    # Split the dataset
+    X_train, y_train, X_val, y_val, X_test, y_test = train_val_test_split(
         X=X_data, y=y_data, val_ratio=0.15, test_ratio=0.15
     )
 
-    
+    nn = MyNN(
+        architecture=[2, 16, 8, 1],
+        activations=["leaky_relu", "leaky_relu", "sigmoid"],
+        loss_func="MSE",
+        learning_rate=0.01,
+        dropout_rate=0.1,
+        L2_reg_coef=0.001
+    )
+
+
+nn.train(X_train, y_train, epochs=100, batch_size=32, val_data=(X_val, y_val))
